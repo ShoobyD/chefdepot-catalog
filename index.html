@@ -132,6 +132,17 @@
     color: var(--muted);
     font-size: 13px;
   }
+  .crumbs { display: inline; }
+  .crumbs button {
+    font: inherit;
+    color: var(--accent);
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
+  .crumbs button:hover { text-decoration: underline; }
+  .crumbs .here { color: var(--text); font-weight: 600; }
 
   /* Side panel + content. In RTL the first column sits on the right. */
   .layout {
@@ -278,12 +289,20 @@
     transition: transform .12s ease, border-color .12s ease;
   }
   a.tile:hover { transform: translateY(-2px); border-color: var(--accent); }
+  /* The photo is positioned out of flow so its size can't stretch the 4:3 box (and the tile). */
   .img {
+    position: relative;
     aspect-ratio: 4 / 3;
+    overflow: hidden;
     background: var(--img-bg);
-    padding: 8px;
   }
-  .img img { display: block; width: 100%; height: 100%; object-fit: contain; }
+  .img img {
+    position: absolute;
+    inset: 8px;
+    width: calc(100% - 16px);
+    height: calc(100% - 16px);
+    object-fit: contain;
+  }
   .body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
   .name {
     font-size: 14px;
@@ -316,13 +335,14 @@
   <aside class="side" id="side" aria-label="קטגוריות">
     <div class="side-head">
       <h2>קטגוריות</h2>
+      <button id="expandAll" type="button">הרחב הכל</button>
       <button id="foldAll" type="button">כווץ הכל</button>
       <button id="sideClose" class="close" type="button" aria-label="סגירה">✕</button>
     </div>
     <nav id="tree"></nav>
   </aside>
   <div class="content">
-    <div class="meta" id="meta" aria-live="polite"></div>
+    <div class="meta"><nav class="crumbs" id="crumbs" aria-label="מיקום בקטגוריות"></nav><span id="meta" aria-live="polite"></span></div>
     <main>
       <div class="grid" id="grid"></div>
       <div class="empty" id="empty" hidden>לא נמצאו מוצרים</div>
@@ -354,12 +374,6 @@
   D.categories.forEach(([name, depth, count], i) => {
     cat.append(new Option('\u00a0'.repeat(depth * 4) + name + ' (' + num.format(count) + ')', i));
   });
-
-  function categoryPath(i) {
-    const names = [];
-    for (; i >= 0; i = D.categories[i][3]) names.unshift(D.categories[i][0]);
-    return names.join(' › ');
-  }
 
   // --- Side panel: a foldable category tree, built lazily as branches open ---
   const side = $('side'), tree = $('tree'), sideBtn = $('sideBtn');
@@ -449,14 +463,49 @@
     if (br.top < sr.top + 40 || br.bottom > sr.bottom) side.scrollTop += br.top - sr.top - sr.height / 3;
   }
 
+  // Breadcrumbs: every level above the current category is a link back to it.
+  const crumbs = $('crumbs');
+  function renderCrumbs(c) {
+    crumbs.replaceChildren();
+    if (c === null) return;
+    const chain = [];
+    for (let i = c; i >= 0; i = D.categories[i][3]) chain.unshift(i);
+    const link = (label, value) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.addEventListener('click', () => choose(value));
+      return b;
+    };
+    crumbs.append(link('כל הקטגוריות', ''));
+    chain.forEach((i, k) => {
+      crumbs.append(' › ');
+      if (k === chain.length - 1) {
+        const here = document.createElement('span');
+        here.className = 'here';
+        here.setAttribute('aria-current', 'page');
+        here.textContent = D.categories[i][0];
+        crumbs.append(here);
+      } else {
+        crumbs.append(link(D.categories[i][0], String(i)));
+      }
+    });
+  }
+
   function choose(value) {
     state.cat = value;
     cat.value = value;
     apply();
+    if (value !== '') reveal(+value);
     if (narrow.matches) setDrawer(false);
     window.scrollTo({ top: 0 });
   }
 
+  // Opening a branch builds its children, which may be closed branches themselves, so repeat until none are left.
+  $('expandAll').addEventListener('click', () => {
+    let d;
+    while ((d = tree.querySelector('details:not([open])'))) openBranch(d);
+  });
   $('foldAll').addEventListener('click', () => {
     tree.querySelectorAll('details[open]').forEach(d => { d.open = false; });
   });
@@ -526,7 +575,8 @@
     view.sort((a, b) => (!a.price - !b.price) || sign * (a.price - b.price) || a.name.localeCompare(b.name, 'he'));
 
     sortBtn.textContent = state.dir === 'asc' ? 'מחיר: מהזול ליקר ↑' : 'מחיר: מהיקר לזול ↓';
-    meta.textContent = (c === null ? '' : categoryPath(c) + ' · ') +
+    renderCrumbs(c);
+    meta.textContent = (c === null ? '' : ' · ') +
       num.format(view.length) + ' מוצרים · מחירים כולל מע"מ · נכון ל־' +
       new Date(D.snapshot).toLocaleDateString('he-IL') + ' · אינדקס לא רשמי, לא קשור לחנות';
     empty.hidden = view.length > 0;
